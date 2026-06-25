@@ -1,0 +1,223 @@
+# @bogomolcompany/bogo
+
+[![npm version](https://img.shields.io/npm/v/@bogomolcompany/bogo.svg)](https://www.npmjs.com/package/@bogomolcompany/bogo)
+[![npm downloads](https://img.shields.io/npm/dm/@bogomolcompany/bogo.svg)](https://www.npmjs.com/package/@bogomolcompany/bogo)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/bogomolcomp/bogo/blob/main/LICENSE)
+
+[English version](README.md)
+
+**`bogo create app`** — Express + TypeScript проект за 10 секунд.  
+**`bogo g users`** — controller, service, dto, routes, validator одной командой.  
+**`bogo r users`** — удаляет модуль и убирает роут из index.
+
+CLI-генератор для Express API. Не привязан к конкретному репозиторию — настраивается через `.bogorc.json`.
+
+## Быстрый старт
+
+```bash
+npx @bogomolcompany/bogo create app
+copy .env.example .env
+npm install
+npm run dev
+
+npx bogo g users -m getList -m createUser
+```
+
+## Почему bogo
+
+| | NestJS CLI | express-generator | **bogo** |
+|---|:---:|:---:|:---:|
+| Express без своего фреймворка | — | ✓ | ✓ |
+| TypeScript из коробки | ✓ | — | ✓ |
+| DTO + Zod validator | ✓ | — | ✓ |
+| Стартовый проект (server, logger, middleware) | частично | — | ✓ |
+| Минимальные зависимости | — | ✓ | ✓ |
+| Генерация модулей в существующий проект | ✓ | — | ✓ |
+
+bogo — для тех, кто пишет на чистом Express + TS и устал каждый раз копировать одну и ту же структуру файлов.
+
+## Установка
+
+```bash
+npm install -g @bogomolcompany/bogo
+# или локально
+npm install --save-dev @bogomolcompany/bogo
+npx bogo --help
+```
+
+Из исходников:
+
+```bash
+git clone https://github.com/bogomolcomp/bogo.git
+cd bogo
+npm install
+npm run build
+npm link
+```
+
+## Создание нового проекта
+
+```bash
+mkdir my-api && cd my-api
+bogo create app
+```
+
+Или в подпапку:
+
+```bash
+bogo create app my-api
+cd my-api
+```
+
+Создаёт:
+
+```
+package.json
+tsconfig.json
+.env.example
+.bogorc.json
+src/
+  index.ts
+  types/express.d.ts
+  middlewares/
+    logger.ts
+    formatResponse.ts
+    validate.ts
+  utils/
+    getAllowedIps.ts
+  api/
+```
+
+Включено: dotenv, body-parser, logger, formatResponse, IP whitelist (`ALLOWED_IPS`), `/health`, глобальный error handler.
+
+```bash
+copy .env.example .env
+npm install
+npm run dev
+```
+
+## Инициализация в существующем проекте
+
+```bash
+cd /path/to/your-express-app
+bogo init
+```
+
+Создаёт `.bogorc.json`:
+
+```json
+{
+  "apiDir": "src/api",
+  "indexFile": "src/index.ts",
+  "routePrefix": "/api"
+}
+```
+
+## Генерация модуля
+
+```bash
+bogo g analytics -m getStats -m getReport
+bogo g orders -m createOrder:/create -m getOrder:/:id
+```
+
+Создаёт:
+
+```
+src/api/analytics/
+  analytics.controller.ts
+  analytics.service.ts
+  analytics.dto.ts
+  analytics.validator.ts
+  analytics.routes.ts
+```
+
+Автоматически дописывает import и `app.use` в `src/index.ts`, если файл найден.
+
+## Генерация отдельного файла
+
+```bash
+bogo g controller users -m getList
+bogo g service users -m getList
+bogo g dto users -m getList -m createUser
+bogo g validator users -m getList
+bogo g routes users -m getList:/list
+```
+
+Части: `controller`, `service`, `dto`, `validator`, `routes`.
+
+Папка модуля создаётся автоматически, если её ещё нет. При генерации `routes` index обновляется так же, как при полном модуле.
+
+```bash
+bogo r controller users
+bogo r routes users
+```
+
+## Добавление метода в существующий модуль
+
+```bash
+bogo g method users -m getList
+bogo g method users -m createUser -m updateUser:/:id
+```
+
+Добавляет метод во все существующие файлы модуля: controller, service, dto, validator, routes.
+
+Только в конкретные части:
+
+```bash
+bogo g method users -m getList -p controller
+bogo g method users -m getList -p controller -p service -p dto
+```
+
+`-m` обязателен. `-p` — опционально, без него обновляются все найденные файлы.
+
+## Удаление модуля
+
+```bash
+bogo r analytics
+bogo r orders --skip-index
+```
+
+Удаляет папку модуля и убирает import + `app.use` из index.
+
+## Опции
+
+| Флаг | Описание |
+|------|----------|
+| `-m, --method` | Имя метода. Повторяемый. Формат: `getList` или `getList:/custom-path` |
+| `-p, --part` | Только указанная часть (для `g method` и `g <part>`) |
+| `--skip-index` | Не править index-файл (для `g` и `r`) |
+
+## Требования к целевому проекту
+
+- Express + TypeScript
+- Zod для валидации
+- Middleware `validate` по пути `src/middlewares/validate`
+- `res.success` / `res.error` через middleware ответа
+
+`bogo create app` создаёт всё это автоматически.
+
+## Разработка
+
+```bash
+npm run build
+npm run dev -- create app ./tmp-app
+npm run dev -- g test -m getList
+npm run dev -- g method test -m createUser
+npm run dev -- r test
+```
+
+## Ссылки
+
+- npm: https://www.npmjs.com/package/@bogomolcompany/bogo
+- GitHub: https://github.com/bogomolcomp/bogo
+- Issues / feedback: https://github.com/bogomolcomp/bogo/issues
+
+## Публикация
+
+```bash
+npm publish --otp=YOUR_CODE
+```
+
+## Лицензия
+
+MIT

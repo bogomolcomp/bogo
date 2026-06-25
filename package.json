@@ -1,11 +1,33 @@
 {
   "name": "@bogomolcompany/bogo",
+  "version": "0.1.1",
+  "description": "CLI to scaffold Express + TypeScript API projects and generate modules (controller, service, dto, routes, validator)",
+  "license": "MIT",
+  "author": "bogomolcompany",
+  "keywords": [
+    "express",
+    "typescript",
+    "cli",
+    "scaffold",
+    "generator",
+    "api",
+    "boilerplate",
+    "rest-api",
+    "express-generator",
+    "zod",
+    "backend"
+  ],
+  "homepage": "https://github.com/bogomolcomp/bogo#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bogomolcomp/bogo.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bogomolcomp/bogo/issues"
+  },
   "publishConfig": {
     "access": "public"
   },
-  "version": "0.1.1",
-  "description": "CLI generator for Express API modules",
-  "license": "MIT",
   "bin": {
     "bogo": "./dist/cli.js"
   },
