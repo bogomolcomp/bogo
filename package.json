@@ -1,0 +1,32 @@
+{
+  "name": "@bogomolcompany/bogo",
+  "publishConfig": {
+    "access": "public"
+  },
+  "version": "0.1.1",
+  "description": "CLI generator for Express API modules",
+  "license": "MIT",
+  "bin": {
+    "bogo": "./dist/cli.js"
+  },
+  "main": "./dist/cli.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/cli.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
