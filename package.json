@@ -1,6 +1,6 @@
 {
   "name": "@bogomolcompany/bogo",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "CLI to scaffold Express + TypeScript API projects and generate modules (controller, service, dto, routes, validator)",
   "license": "MIT",
   "author": "bogomolcompany",
