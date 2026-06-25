@@ -33,7 +33,9 @@
   },
   "main": "./dist/cli.js",
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "docs/demo/bogo-demo.gif"
   ],
   "scripts": {
     "build": "tsc",

@@ -6,8 +6,8 @@
 
 [English version](README.md)
 
-**`bogo create app`** — Express + TypeScript проект за 10 секунд.  
-**`bogo g users`** — controller, service, dto, routes, validator одной командой.  
+**`bogo create app`** — Express + TypeScript проект за 10 секунд.
+**`bogo g users`** — controller, service, dto, routes, validator одной командой.
 **`bogo r users`** — удаляет модуль и убирает роут из index.
 
 CLI-генератор для Express API. Не привязан к конкретному репозиторию — настраивается через `.bogorc.json`.
