@@ -1,6 +1,6 @@
 {
   "name": "@bogomolcompany/bogo",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "CLI to scaffold Express + TypeScript API projects and generate modules (controller, service, dto, routes, validator)",
   "license": "MIT",
   "author": "bogomolcompany",
@@ -38,6 +38,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "ts-node src/cli.ts",
+    "test": "vitest run",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
@@ -46,7 +47,8 @@
   "devDependencies": {
     "@types/node": "^22.5.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
   },
   "engines": {
     "node": ">=18"

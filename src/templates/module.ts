@@ -1,25 +1,20 @@
-import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { ModulePart, ModuleTemplateContext } from "../interfaces";
-import { methodToRoutePath } from "../utils/naming";
+import { ensureDir, writeTextFile } from "../utils/io";
+import {
+  renderControllerMethod,
+  renderDtoBlock,
+  renderMiddlewareImports,
+  renderRouteLine,
+  renderServiceMethod,
+  renderValidatorBlock,
+} from "./render-helpers";
+import { renderWithTemplate } from "../utils/template-loader";
 
-export function renderController(ctx: ModuleTemplateContext): string {
-  const { names, methods } = ctx;
-  const methodsCode = methods
-    .map(
-      method => `
-  async ${method.name}(req: e.Request, res: e.Response) {
-    try {
-      const result = await ${names.pascal}Service.${method.name}(req.body);
-      return res.success(result);
-    } catch (error) {
-      return res.error(error);
-    }
-  }`
-    )
-    .join("\n");
-
-  return `import e from "express";
+export function renderController(ctx: ModuleTemplateContext, templatesDir?: string): string {
+  return renderWithTemplate("controller", ctx, templatesDir, ({ names, methods }) => {
+    const methodsCode = methods.map(method => renderControllerMethod(names, method)).join("\n");
+    return `import e from "express";
 import ${names.pascal}Service from "./${names.kebab}.service";
 
 class ${names.pascal}Controller {${methodsCode}
@@ -27,69 +22,42 @@ class ${names.pascal}Controller {${methodsCode}
 
 export default new ${names.pascal}Controller();
 `;
+  });
 }
 
-export function renderService(ctx: ModuleTemplateContext): string {
-  const { names, methods } = ctx;
-  const imports =
-    methods.length > 0
-      ? `import { ${methods.map(m => `${m.name}DTO`).join(", ")} } from "./${names.kebab}.dto";\n`
-      : "";
-
-  const methodsCode = methods
-    .map(
-      method => `
-  async ${method.name}(body: ${method.name}DTO) {
-    throw new Error("${names.pascal}Service.${method.name} is not implemented");
-  }`
-    )
-    .join("\n");
-
-  return `${imports}
+export function renderService(ctx: ModuleTemplateContext, templatesDir?: string): string {
+  return renderWithTemplate("service", ctx, templatesDir, ({ names, methods }) => {
+    const imports =
+      methods.length > 0
+        ? `import { ${methods.map(m => `${m.name}DTO`).join(", ")} } from "./${names.kebab}.dto";\n`
+        : "";
+    const methodsCode = methods.map(method => renderServiceMethod(names, method)).join("\n");
+    return `${imports}
 class ${names.pascal}Service {${methodsCode}
 }
 
 export default new ${names.pascal}Service();
 `;
+  });
 }
 
-export function renderDto(ctx: ModuleTemplateContext): string {
-  const blocks = ctx.methods.map(
-    method => `export interface ${method.name}DTO {
-  // TODO: define fields
-}
-`
-  );
-
-  return blocks.join("\n");
+export function renderDto(ctx: ModuleTemplateContext, templatesDir?: string): string {
+  return renderWithTemplate("dto", ctx, templatesDir, ({ methods }) => methods.map(renderDtoBlock).join("\n"));
 }
 
-export function renderValidator(ctx: ModuleTemplateContext): string {
-  const exports = ctx.methods.map(
-    method => `export const ${method.name} = z.object({
-  body: z.object({
-    // TODO: define validation schema
-  }),
-});
-`
-  );
+export function renderValidator(ctx: ModuleTemplateContext, templatesDir?: string): string {
+  return renderWithTemplate("validator", ctx, templatesDir, ({ methods }) => {
+    return `import { z } from "zod";
 
-  return `import { z } from "zod";
-
-${exports.join("\n")}`;
+${methods.map(renderValidatorBlock).join("\n")}`;
+  });
 }
 
-export function renderRoutes(ctx: ModuleTemplateContext): string {
-  const { names, methods } = ctx;
-  const validatorImports = methods.map(m => m.name).join(", ");
-  const routes = methods
-    .map(method => {
-      const routePath = methodToRoutePath(method.name, method.route);
-      return `router.post("${routePath}", validate(${method.name}), (req: Request, res: Response) => controller.${method.name}(req, res));`;
-    })
-    .join("\n");
-
-  return `import { Request, Response, Router } from "express";
+export function renderRoutes(ctx: ModuleTemplateContext, templatesDir?: string): string {
+  return renderWithTemplate("routes", ctx, templatesDir, ({ names, methods, middleware }) => {
+    const validatorImports = methods.map(method => method.name).join(", ");
+    const routes = methods.map(method => renderRouteLine(method, middleware)).join("\n");
+    return `${renderMiddlewareImports(middleware)}import { Request, Response, Router } from "express";
 import { validate } from "../../middlewares/validate";
 import ${names.pascal}Controller from "./${names.kebab}.controller";
 import { ${validatorImports} } from "./${names.kebab}.validator";
@@ -101,9 +69,10 @@ ${routes}
 
 export default router;
 `;
+  });
 }
 
-const PART_RENDERERS: Record<ModulePart, (ctx: ModuleTemplateContext) => string> = {
+const PART_RENDERERS: Record<ModulePart, (ctx: ModuleTemplateContext, templatesDir?: string) => string> = {
   controller: renderController,
   service: renderService,
   dto: renderDto,
@@ -111,23 +80,31 @@ const PART_RENDERERS: Record<ModulePart, (ctx: ModuleTemplateContext) => string>
   routes: renderRoutes,
 };
 
-export function writePartFile(targetDir: string, part: ModulePart, ctx: ModuleTemplateContext): string {
-  if (!existsSync(targetDir)) {
-    mkdirSync(targetDir, { recursive: true });
-  }
+export function renderPart(part: ModulePart, ctx: ModuleTemplateContext, templatesDir?: string): string {
+  return PART_RENDERERS[part](ctx, templatesDir);
+}
+
+export function writePartFile(
+  targetDir: string,
+  part: ModulePart,
+  ctx: ModuleTemplateContext,
+  templatesDir?: string,
+  options: { dryRun?: boolean; force?: boolean } = {}
+): string {
+  ensureDir(targetDir, options);
 
   const fileName = `${ctx.names.kebab}.${part}.ts`;
   const filePath = join(targetDir, fileName);
-
-  if (existsSync(filePath)) {
-    throw new Error(`File already exists: ${filePath}`);
-  }
-
-  writeFileSync(filePath, PART_RENDERERS[part](ctx), "utf-8");
+  writeTextFile(filePath, renderPart(part, ctx, templatesDir), options);
   return filePath;
 }
 
-export function writeModuleFiles(targetDir: string, ctx: ModuleTemplateContext): string[] {
+export function writeModuleFiles(
+  targetDir: string,
+  ctx: ModuleTemplateContext,
+  templatesDir?: string,
+  options: { dryRun?: boolean; force?: boolean } = {}
+): string[] {
   const parts: ModulePart[] = ["controller", "service", "dto", "validator", "routes"];
-  return parts.map(part => writePartFile(targetDir, part, ctx));
+  return parts.map(part => writePartFile(targetDir, part, ctx, templatesDir, options));
 }

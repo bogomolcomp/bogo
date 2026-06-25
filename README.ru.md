@@ -12,6 +12,8 @@
 
 CLI-генератор для Express API. Не привязан к конкретному репозиторию — настраивается через `.bogorc.json`.
 
+![bogo demo](docs/demo/bogo-demo.gif)
+
 ## Быстрый старт
 
 ```bash
@@ -58,15 +60,7 @@ npm link
 ## Создание нового проекта
 
 ```bash
-mkdir my-api && cd my-api
-bogo create app
-```
-
-Или в подпапку:
-
-```bash
-bogo create app my-api
-cd my-api
+bogo create app my-api --with-docker --with-eslint
 ```
 
 Создаёт:
@@ -109,15 +103,19 @@ bogo init
 {
   "apiDir": "src/api",
   "indexFile": "src/index.ts",
-  "routePrefix": "/api"
+  "routePrefix": "/api",
+  "templatesDir": "./bogo-templates"
 }
 ```
+
+`templatesDir` — опционально. Файлы `controller.template`, `service.template` и т.д. переопределяют встроенные шаблоны.
 
 ## Генерация модуля
 
 ```bash
 bogo g analytics -m getStats -m getReport
-bogo g orders -m createOrder:/create -m getOrder:/:id
+bogo g orders -m createOrder:POST:/create -m getOrder:GET:/:id
+bogo g posts -m getList:GET:/list -w auth
 ```
 
 Создаёт:
@@ -170,6 +168,33 @@ bogo g method users -m getList -p controller -p service -p dto
 
 `-m` обязателен. `-p` — опционально, без него обновляются все найденные файлы.
 
+## Удаление метода
+
+```bash
+bogo r method users -m getList
+bogo r method users -m createUser -p controller -p service
+```
+
+## Список модулей
+
+```bash
+bogo list
+```
+
+## Doctor
+
+```bash
+bogo doctor
+```
+
+Проверяет `.bogorc.json`, index, api-папку и middleware.
+
+## Интерактивный режим
+
+```bash
+bogo g --interactive
+```
+
 ## Удаление модуля
 
 ```bash
@@ -179,13 +204,28 @@ bogo r orders --skip-index
 
 Удаляет папку модуля и убирает import + `app.use` из index.
 
+## Формат `-m`
+
+| Пример | Результат |
+|--------|-----------|
+| `getList` | POST `/get-list` |
+| `getList:GET` | GET `/get-list` |
+| `getOrder:GET:/:id` | GET `/:id` |
+| `createOrder:POST:/create` | POST `/create` |
+
 ## Опции
 
 | Флаг | Описание |
 |------|----------|
-| `-m, --method` | Имя метода. Повторяемый. Формат: `getList` или `getList:/custom-path` |
-| `-p, --part` | Только указанная часть (для `g method` и `g <part>`) |
-| `--skip-index` | Не править index-файл (для `g` и `r`) |
+| `-m, --method` | Спецификация метода (повторяемый) |
+| `-p, --part` | Только указанная часть |
+| `-w, --middleware` | Middleware для роута (повторяемый) |
+| `-i, --interactive` | Интерактивная генерация |
+| `--dry-run` | Показать изменения без записи |
+| `--force` | Перезаписать существующие файлы |
+| `--skip-index` | Не править index-файл |
+| `--with-docker` | Docker-файлы в `create app` |
+| `--with-eslint` | ESLint в `create app` |
 
 ## Требования к целевому проекту
 
@@ -200,10 +240,13 @@ bogo r orders --skip-index
 
 ```bash
 npm run build
-npm run dev -- create app ./tmp-app
-npm run dev -- g test -m getList
+npm test
+npm run dev -- create app ./tmp-app --with-eslint
+npm run dev -- g test -m getList:GET
 npm run dev -- g method test -m createUser
-npm run dev -- r test
+npm run dev -- r method test -m createUser
+npm run dev -- list
+npm run dev -- doctor
 ```
 
 ## Ссылки

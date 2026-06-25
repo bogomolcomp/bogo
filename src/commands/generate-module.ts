@@ -3,37 +3,38 @@ import { join } from "path";
 import { GenerateModuleOptions, ModulePart, ModuleTemplateContext } from "../interfaces";
 import { writeModuleFiles, writePartFile } from "../templates/module";
 import { getDefaultConfigContent, loadConfig } from "../utils/config";
+import { parseMethodSpec } from "../utils/method-spec";
 import { resolveModuleNames } from "../utils/naming";
-import { parseMethodSpec } from "../utils/patch-method";
 import { patchIndexFile, suggestIndexPatch } from "../utils/patch-index";
 
 function buildContext(moduleName: string, options: GenerateModuleOptions): ModuleTemplateContext {
   const names = resolveModuleNames(moduleName);
-  const methods = options.methods.length > 0 ? options.methods.map(parseMethodSpec) : [{ name: "execute" }];
-  return { names, methods };
+  const methods =
+    options.methods.length > 0
+      ? options.methods.map(parseMethodSpec)
+      : [{ name: "execute", httpMethod: "POST" as const }];
+  return { names, methods, middleware: options.middleware };
 }
 
 function patchIndexIfNeeded(
   cwd: string,
   ctx: ModuleTemplateContext,
-  skipIndex: boolean,
+  options: GenerateModuleOptions,
   part?: ModulePart
 ): void {
-  if (skipIndex || (part && part !== "routes")) {
-    if (skipIndex) {
-      console.log(`\nSkipped index patch (--skip-index)`);
+  if (options.skipIndex || options.dryRun || (part && part !== "routes")) {
+    if (options.skipIndex) {
+      console.log("\nSkipped index patch (--skip-index)");
     }
     return;
   }
 
   const config = loadConfig(cwd);
-  const indexPath = join(cwd, config.indexFile);
-  const patched = patchIndexFile(indexPath, ctx.names, config.routePrefix);
-
+  const patched = patchIndexFile(cwd, config, ctx.names, { dryRun: options.dryRun });
   if (patched) {
-    console.log(`\nUpdated ${indexPath}`);
+    console.log(`\nUpdated ${join(cwd, config.indexFile)}`);
   } else if (!part) {
-    console.log(`\n${suggestIndexPatch(ctx.names, config.routePrefix)}`);
+    console.log(`\n${suggestIndexPatch(config, ctx.names)}`);
   }
 }
 
@@ -54,18 +55,19 @@ export function runGenerateModule(cwd: string, moduleName: string, options: Gene
   const ctx = buildContext(moduleName, options);
   const targetDir = join(cwd, config.apiDir, ctx.names.kebab);
 
-  if (existsSync(targetDir)) {
+  if (existsSync(targetDir) && !options.force) {
     throw new Error(`Module directory already exists: ${targetDir}`);
   }
 
-  const written = writeModuleFiles(targetDir, ctx);
+  const ioOptions = { dryRun: options.dryRun, force: options.force };
+  const written = writeModuleFiles(targetDir, ctx, config.templatesDir, ioOptions);
 
   console.log(`Module "${ctx.names.kebab}" created:\n`);
   for (const file of written) {
     console.log(`  ${file}`);
   }
 
-  patchIndexIfNeeded(cwd, ctx, options.skipIndex);
+  patchIndexIfNeeded(cwd, ctx, options);
 }
 
 export function runGeneratePart(
@@ -77,9 +79,11 @@ export function runGeneratePart(
   const config = loadConfig(cwd);
   const ctx = buildContext(moduleName, options);
   const targetDir = join(cwd, config.apiDir, ctx.names.kebab);
-  const written = writePartFile(targetDir, part, ctx);
+  const written = writePartFile(targetDir, part, ctx, config.templatesDir, {
+    dryRun: options.dryRun,
+    force: options.force,
+  });
 
   console.log(`${part} for "${ctx.names.kebab}" created:\n  ${written}`);
-
-  patchIndexIfNeeded(cwd, ctx, options.skipIndex, part);
+  patchIndexIfNeeded(cwd, ctx, options, part);
 }

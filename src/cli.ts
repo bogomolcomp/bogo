@@ -1,16 +1,23 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "fs";
+import { join } from "path";
 import { Command } from "commander";
 import { runAddMethod } from "./commands/add-method";
 import { runCreateApp } from "./commands/create-app";
+import { runDoctor } from "./commands/doctor";
 import { runGenerateModule, runGeneratePart, runInit } from "./commands/generate-module";
-import { runRemoveModule, runRemovePart } from "./commands/remove-module";
-import { ModulePart } from "./interfaces";
+import { runInteractiveGenerate } from "./commands/interactive";
+import { runList } from "./commands/list-modules";
+import { runRemoveMethod, runRemoveModule, runRemovePart } from "./commands/remove-module";
+import { GenerateModuleOptions, ModulePart } from "./interfaces";
 import { isModulePart } from "./utils/parts";
+
+const pkg = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf-8")) as { version: string };
 
 const program = new Command();
 
-program.name("bogo").description("CLI generator for Express API modules").version("0.1.0");
+program.name("bogo").description("CLI generator for Express API modules").version(pkg.version);
 
 program
   .command("init")
@@ -29,12 +36,16 @@ program
   .description("Create a new project")
   .argument("<type>", "project type (app)")
   .argument("[path]", "target directory", ".")
-  .action((type: string, path: string) => {
+  .option("--with-docker", "Add Dockerfile and docker-compose.yml", false)
+  .option("--with-eslint", "Add ESLint config", false)
+  .option("--dry-run", "Preview files without writing", false)
+  .option("--force", "Overwrite existing files", false)
+  .action((type: string, path: string, options: { withDocker: boolean; withEslint: boolean; dryRun: boolean; force: boolean }) => {
     try {
       if (type !== "app") {
         throw new Error(`Unknown type "${type}". Available: app`);
       }
-      runCreateApp(process.cwd(), path);
+      runCreateApp(process.cwd(), path, options);
     } catch (error) {
       console.error(error instanceof Error ? error.message : error);
       process.exit(1);
@@ -42,25 +53,67 @@ program
   });
 
 program
+  .command("list")
+  .description("List API modules in the project")
+  .action(() => {
+    try {
+      runList(process.cwd());
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("doctor")
+  .description("Check project setup for bogo")
+  .action(() => {
+    try {
+      runDoctor(process.cwd());
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+const generate = program
   .command("generate")
   .alias("g")
   .description("Generate API module, part, or method")
-  .argument("<target>", "module name, part, or method")
+  .argument("[target]", "module name, part, or method")
   .argument("[name]", "module name for part/method")
-  .option("-m, --method <method>", "method name (repeatable), format: getList or getList:/custom-path", collect, [])
-  .option("-p, --part <part>", "target part only (repeatable): controller|service|dto|validator|routes", collect, [])
-  .option("--skip-index", "do not patch index file", false)
+  .option("-m, --method <method>", "method spec (repeatable): getList, getList:GET, getOrder:GET:/:id", collect, [])
+  .option("-p, --part <part>", "target part only (repeatable)", collect, [])
+  .option("-w, --middleware <name>", "route middleware (repeatable)", collect, [])
+  .option("-i, --interactive", "Interactive mode", false)
+  .option("--skip-index", "Do not patch index file", false)
+  .option("--dry-run", "Preview changes without writing", false)
+  .option("--force", "Overwrite existing files", false)
   .action(
-    (
-      target: string,
+    async (
+      target: string | undefined,
       name: string | undefined,
-      options: { method: string[]; part: string[]; skipIndex: boolean }
+      options: {
+        method: string[];
+        part: string[];
+        middleware: string[];
+        interactive: boolean;
+        skipIndex: boolean;
+        dryRun: boolean;
+        force: boolean;
+      }
     ) => {
       try {
-        const generateOptions = {
-          methods: options.method,
-          skipIndex: options.skipIndex,
-        };
+        const generateOptions = buildGenerateOptions(options);
+
+        if (options.interactive) {
+          await runInteractiveGenerate(process.cwd(), generateOptions);
+          return;
+        }
+
+        if (!target) {
+          throw new Error("Target required. Example: bogo g users -m getList");
+        }
 
         if (target === "method") {
           if (!name) {
@@ -69,9 +122,12 @@ program
           if (options.method.length === 0) {
             throw new Error("At least one -m is required. Example: bogo g method users -m getList");
           }
-
-          const parts = parseParts(options.part);
-          runAddMethod(process.cwd(), name, { methods: options.method, parts });
+          runAddMethod(process.cwd(), name, {
+            methods: options.method,
+            parts: parseParts(options.part),
+            dryRun: options.dryRun,
+            middleware: options.middleware,
+          });
           return;
         }
 
@@ -98,13 +154,31 @@ program
 program
   .command("remove")
   .alias("r")
-  .description("Remove API module or a single part")
-  .argument("<target>", "module name or part: controller|service|dto|validator|routes")
-  .argument("[name]", "module name when removing a single part")
-  .option("--skip-index", "do not patch index file", false)
-  .action((target: string, name: string | undefined, options: { skipIndex: boolean }) => {
+  .description("Remove API module, part, or method")
+  .argument("<target>", "module name, part, or method")
+  .argument("[name]", "module name for part/method")
+  .option("-m, --method <method>", "method name to remove (repeatable)", collect, [])
+  .option("-p, --part <part>", "target part only (repeatable)", collect, [])
+  .option("--skip-index", "Do not patch index file", false)
+  .option("--dry-run", "Preview changes without writing", false)
+  .action((target: string, name: string | undefined, options: { method: string[]; part: string[]; skipIndex: boolean; dryRun: boolean }) => {
     try {
-      const removeOptions = { skipIndex: options.skipIndex };
+      const removeOptions = { skipIndex: options.skipIndex, dryRun: options.dryRun };
+
+      if (target === "method") {
+        if (!name) {
+          throw new Error("Module name required. Example: bogo r method users -m getList");
+        }
+        if (options.method.length === 0) {
+          throw new Error("At least one -m is required. Example: bogo r method users -m getList");
+        }
+        runRemoveMethod(process.cwd(), name, {
+          methods: options.method,
+          parts: parseParts(options.part),
+          dryRun: options.dryRun,
+        });
+        return;
+      }
 
       if (isModulePart(target)) {
         if (!name) {
@@ -115,7 +189,7 @@ program
       }
 
       if (name) {
-        throw new Error(`Unexpected argument "${name}". Use: bogo r <module> or bogo r <part> <module>`);
+        throw new Error(`Unexpected argument "${name}". Use: bogo r <module>, bogo r <part> <module>, or bogo r method <module> -m <name>`);
       }
 
       runRemoveModule(process.cwd(), target, removeOptions);
@@ -140,6 +214,22 @@ function parseParts(values: string[]): ModulePart[] {
   }
 
   return values as ModulePart[];
+}
+
+function buildGenerateOptions(options: {
+  method: string[];
+  middleware: string[];
+  skipIndex: boolean;
+  dryRun: boolean;
+  force: boolean;
+}): GenerateModuleOptions {
+  return {
+    methods: options.method,
+    middleware: options.middleware,
+    skipIndex: options.skipIndex,
+    dryRun: options.dryRun,
+    force: options.force,
+  };
 }
 
 program.parse();

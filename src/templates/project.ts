@@ -1,6 +1,8 @@
-import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { existsSync } from "fs";
 import { join } from "path";
+import { CreateAppOptions } from "../interfaces";
 import { getDefaultConfigContent } from "../utils/config";
+import { ensureDir, writeTextFile } from "../utils/io";
 
 const PROJECT_FILES: Record<string, string> = {
   "package.json": `{
@@ -8,9 +10,10 @@ const PROJECT_FILES: Record<string, string> = {
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "ts-node src/index.ts",
+    "dev": "nodemon --watch src --exec ts-node src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "lint": "eslint src --ext .ts"
   },
   "dependencies": {
     "body-parser": "^1.20.3",
@@ -24,6 +27,7 @@ const PROJECT_FILES: Record<string, string> = {
     "@types/body-parser": "^1.19.5",
     "@types/express": "^4.17.21",
     "@types/node": "^22.5.0",
+    "nodemon": "^3.1.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.4"
   },
@@ -65,8 +69,10 @@ import "log-timestamp";
 import { formatResponse } from "./middlewares/formatResponse";
 import { logger } from "./middlewares/logger";
 import { getAllowedIps } from "./utils/getAllowedIps";
+import { validateEnv } from "./utils/env";
 
 config.config();
+validateEnv();
 
 const app = express();
 
@@ -172,38 +178,110 @@ export function validate(schema: ZodSchema) {
   return raw.split(",").map(ip => ip.trim()).filter(Boolean);
 }
 `,
+  "src/utils/env.ts": `import { z } from "zod";
+
+const envSchema = z.object({
+  PORT: z.coerce.number().default(3000),
+  ALLOWED_IPS: z.string().optional(),
+});
+
+export function validateEnv() {
+  const parsed = envSchema.safeParse(process.env);
+  if (!parsed.success) {
+    throw new Error(parsed.error.message);
+  }
+  return parsed.data;
+}
+`,
 };
 
-function renderPackageJson(projectName: string): string {
-  const content = PROJECT_FILES["package.json"];
-  return content.replace('"name": "express-api"', `"name": "${projectName}"`);
+const ESLINT_FILES: Record<string, string> = {
+  ".eslintrc.json": `{
+  "env": { "es2022": true, "node": true },
+  "parser": "@typescript-eslint/parser",
+  "plugins": ["@typescript-eslint"],
+  "extends": ["eslint:recommended", "plugin:@typescript-eslint/recommended"],
+  "ignorePatterns": ["dist"]
+}
+`,
+};
+
+const DOCKER_FILES: Record<string, string> = {
+  Dockerfile: `FROM node:22-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+RUN npm run build
+EXPOSE 3000
+CMD ["npm", "start"]
+`,
+  "docker-compose.yml": `services:
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+`,
+};
+
+function renderPackageJson(projectName: string, options: CreateAppOptions): string {
+  let content = PROJECT_FILES["package.json"].replace('"name": "express-api"', `"name": "${projectName}"`);
+
+  if (options.withEslint) {
+    content = content.replace(
+      `"typescript": "^5.5.4"\n  }`,
+      `"typescript": "^5.5.4",\n    "@typescript-eslint/eslint-plugin": "^8.3.0",\n    "@typescript-eslint/parser": "^8.3.0",\n    "eslint": "^8.57.0"\n  }`
+    );
+  }
+
+  if (!options.withEslint) {
+    content = content.replace(`    "lint": "eslint src --ext .ts"\n`, "");
+  }
+
+  return content;
 }
 
-export function writeProjectFiles(targetDir: string, projectName: string): string[] {
-  if (existsSync(join(targetDir, "package.json"))) {
+export function writeProjectFiles(targetDir: string, projectName: string, options: CreateAppOptions): string[] {
+  if (existsSync(join(targetDir, "package.json")) && !options.force) {
     throw new Error(`Directory already contains package.json: ${targetDir}`);
   }
 
-  if (!existsSync(targetDir)) {
-    mkdirSync(targetDir, { recursive: true });
-  }
-
-  mkdirSync(join(targetDir, "src", "api"), { recursive: true });
-  mkdirSync(join(targetDir, "src", "middlewares"), { recursive: true });
-  mkdirSync(join(targetDir, "src", "utils"), { recursive: true });
-  mkdirSync(join(targetDir, "src", "types"), { recursive: true });
+  ensureDir(targetDir, options);
+  ensureDir(join(targetDir, "src", "api"), options);
+  ensureDir(join(targetDir, "src", "middlewares"), options);
+  ensureDir(join(targetDir, "src", "utils"), options);
+  ensureDir(join(targetDir, "src", "types"), options);
 
   const written: string[] = [];
+  const io = { dryRun: options.dryRun, force: options.force };
 
   for (const [relativePath, content] of Object.entries(PROJECT_FILES)) {
     const filePath = join(targetDir, relativePath);
-    const fileContent = relativePath === "package.json" ? renderPackageJson(projectName) : content;
-    writeFileSync(filePath, fileContent, "utf-8");
+    const fileContent = relativePath === "package.json" ? renderPackageJson(projectName, options) : content;
+    writeTextFile(filePath, fileContent, io);
     written.push(filePath);
   }
 
+  if (options.withEslint) {
+    for (const [relativePath, content] of Object.entries(ESLINT_FILES)) {
+      const filePath = join(targetDir, relativePath);
+      writeTextFile(filePath, content, io);
+      written.push(filePath);
+    }
+  }
+
+  if (options.withDocker) {
+    for (const [relativePath, content] of Object.entries(DOCKER_FILES)) {
+      const filePath = join(targetDir, relativePath);
+      writeTextFile(filePath, content, io);
+      written.push(filePath);
+    }
+  }
+
   const configPath = join(targetDir, ".bogorc.json");
-  writeFileSync(configPath, getDefaultConfigContent(), "utf-8");
+  writeTextFile(configPath, getDefaultConfigContent(), io);
   written.push(configPath);
 
   return written;

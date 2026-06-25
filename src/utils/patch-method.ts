@@ -1,16 +1,13 @@
-import { MethodSpec } from "../interfaces";
+import { MethodSpec, ModuleTemplateContext, ModulePart } from "../interfaces";
+import {
+  renderControllerMethod,
+  renderDtoBlock,
+  renderRouteLine,
+  renderServiceMethod,
+  renderValidatorBlock,
+} from "../templates/render-helpers";
+import { routerFn } from "./http";
 import { methodToRoutePath } from "./naming";
-
-export function parseMethodSpec(raw: string): MethodSpec {
-  const [name, route] = raw.split(":");
-  if (!name || !/^[a-zA-Z][a-zA-Z0-9]*$/.test(name)) {
-    throw new Error(`Invalid method name: "${raw}". Use camelCase, e.g. getList or getList:/custom-path`);
-  }
-  return {
-    name,
-    route: route ? methodToRoutePath(name, route) : undefined,
-  };
-}
 
 function addImportSymbol(content: string, importPattern: RegExp, symbol: string): string {
   const match = content.match(importPattern);
@@ -26,34 +23,39 @@ function addImportSymbol(content: string, importPattern: RegExp, symbol: string)
   return content.replace(match[0], match[0].replace(match[1], `${match[1]}, ${symbol}`));
 }
 
-export function patchControllerMethod(content: string, ctx: { names: { pascal: string } }, method: MethodSpec): string {
+function removeImportSymbol(content: string, importPattern: RegExp, symbol: string): string {
+  const match = content.match(importPattern);
+  if (!match) {
+    return content;
+  }
+
+  const symbols = match[1]
+    .split(",")
+    .map(value => value.trim())
+    .filter(Boolean)
+    .filter(value => value !== symbol);
+
+  if (symbols.length === 0) {
+    return content.replace(`${match[0]}\n`, "");
+  }
+
+  return content.replace(match[0], match[0].replace(match[1], symbols.join(", ")));
+}
+
+export function patchControllerMethod(content: string, ctx: ModuleTemplateContext, method: MethodSpec): string {
   if (new RegExp(`async ${method.name}\\(`).test(content)) {
     throw new Error(`Method "${method.name}" already exists in controller`);
   }
 
-  const snippet = `
-  async ${method.name}(req: e.Request, res: e.Response) {
-    try {
-      const result = await ${ctx.names.pascal}Service.${method.name}(req.body);
-      return res.success(result);
-    } catch (error) {
-      return res.error(error);
-    }
-  }`;
-
+  const snippet = renderControllerMethod(ctx.names, method);
   const updated = content.replace(/(\n}\n\nexport default new .+Controller\(\);)/, `${snippet}$1`);
   if (updated === content) {
     throw new Error("Could not patch controller file");
   }
-
   return updated;
 }
 
-export function patchServiceMethod(
-  content: string,
-  ctx: { names: { kebab: string; pascal: string } },
-  method: MethodSpec
-): string {
+export function patchServiceMethod(content: string, ctx: ModuleTemplateContext, method: MethodSpec): string {
   if (new RegExp(`async ${method.name}\\(`).test(content)) {
     throw new Error(`Method "${method.name}" already exists in service`);
   }
@@ -64,49 +66,29 @@ export function patchServiceMethod(
     `${method.name}DTO`
   );
 
-  const snippet = `
-  async ${method.name}(body: ${method.name}DTO) {
-    throw new Error("${ctx.names.pascal}Service.${method.name} is not implemented");
-  }`;
-
+  const snippet = renderServiceMethod(ctx.names, method);
   updated = updated.replace(/(\n}\n\nexport default new .+Service\(\);)/, `${snippet}$1`);
   if (updated === content) {
     throw new Error("Could not patch service file");
   }
-
   return updated;
 }
 
-export function patchDtoMethod(content: string, _ctx: unknown, method: MethodSpec): string {
+export function patchDtoMethod(content: string, _ctx: ModuleTemplateContext, method: MethodSpec): string {
   if (new RegExp(`interface ${method.name}DTO`).test(content)) {
     throw new Error(`Method "${method.name}" already exists in dto`);
   }
-
-  return `${content.trimEnd()}\nexport interface ${method.name}DTO {
-  // TODO: define fields
-}
-`;
+  return `${content.trimEnd()}\n${renderDtoBlock(method)}`;
 }
 
-export function patchValidatorMethod(content: string, _ctx: unknown, method: MethodSpec): string {
+export function patchValidatorMethod(content: string, _ctx: ModuleTemplateContext, method: MethodSpec): string {
   if (new RegExp(`export const ${method.name} =`).test(content)) {
     throw new Error(`Method "${method.name}" already exists in validator`);
   }
-
-  return `${content.trimEnd()}
-export const ${method.name} = z.object({
-  body: z.object({
-    // TODO: define validation schema
-  }),
-});
-`;
+  return `${content.trimEnd()}\n${renderValidatorBlock(method)}`;
 }
 
-export function patchRoutesMethod(
-  content: string,
-  ctx: { names: { kebab: string } },
-  method: MethodSpec
-): string {
+export function patchRoutesMethod(content: string, ctx: ModuleTemplateContext, method: MethodSpec): string {
   if (content.includes(`controller.${method.name}(`)) {
     throw new Error(`Method "${method.name}" already exists in routes`);
   }
@@ -117,13 +99,77 @@ export function patchRoutesMethod(
     method.name
   );
 
-  const routePath = methodToRoutePath(method.name, method.route);
-  const snippet = `router.post("${routePath}", validate(${method.name}), (req: Request, res: Response) => controller.${method.name}(req, res));`;
-
+  const snippet = renderRouteLine(method, ctx.middleware);
   updated = updated.replace(/(\n\nexport default router;\n?)$/, `\n${snippet}$1`);
   if (updated === content) {
     throw new Error("Could not patch routes file");
   }
-
   return updated;
 }
+
+function removeBlock(content: string, pattern: RegExp): string {
+  return content.replace(pattern, "");
+}
+
+export function removeControllerMethod(content: string, methodName: string): string {
+  return removeBlock(
+    content,
+    new RegExp(`\\n  async ${methodName}\\(req: e\\.Request, res: e\\.Response\\) \\{[\\s\\S]*?\\n  \\}`, "m")
+  );
+}
+
+export function removeServiceMethod(content: string, ctx: ModuleTemplateContext, methodName: string): string {
+  let updated = removeBlock(
+    content,
+    new RegExp(`\\n  async ${methodName}\\(dto: ${methodName}DTO\\) \\{[\\s\\S]*?\\n  \\}`, "m")
+  );
+  updated = removeImportSymbol(
+    updated,
+    new RegExp(`import \\{ (.+) \\} from "\\./${ctx.names.kebab}\\.dto";`),
+    `${methodName}DTO`
+  );
+  return updated;
+}
+
+export function removeDtoMethod(content: string, methodName: string): string {
+  return removeBlock(content, new RegExp(`\\nexport interface ${methodName}DTO \\{[\\s\\S]*?\\}\\n`, "m")).trimEnd() + "\n";
+}
+
+export function removeValidatorMethod(content: string, methodName: string): string {
+  return removeBlock(
+    content,
+    new RegExp(`\\nexport const ${methodName} = z\\.object\\(\\{[\\s\\S]*?\\}\\);\\n`, "m")
+  ).trimEnd() + "\n";
+}
+
+export function removeRoutesMethod(content: string, ctx: ModuleTemplateContext, method: MethodSpec): string {
+  const routePath = methodToRoutePath(method.name, method.route);
+  const pattern = new RegExp(
+    `\\nrouter\\.${routerFn(method.httpMethod)}\\("${routePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[\\s\\S]*?controller\\.${method.name}\\(req, res\\)\\);`,
+    "m"
+  );
+
+  let updated = removeBlock(content, pattern);
+  updated = removeImportSymbol(
+    updated,
+    new RegExp(`import \\{ (.+) \\} from "\\./${ctx.names.kebab}\\.validator";`),
+    method.name
+  );
+  return updated;
+}
+
+export const PATCHERS: Record<ModulePart, (content: string, ctx: ModuleTemplateContext, method: MethodSpec) => string> = {
+  controller: patchControllerMethod,
+  service: patchServiceMethod,
+  dto: patchDtoMethod,
+  validator: patchValidatorMethod,
+  routes: patchRoutesMethod,
+};
+
+export const REMOVERS: Record<ModulePart, (content: string, ctx: ModuleTemplateContext, method: MethodSpec) => string> = {
+  controller: (content, _ctx, method) => removeControllerMethod(content, method.name),
+  service: (content, ctx, method) => removeServiceMethod(content, ctx, method.name),
+  dto: (content, _ctx, method) => removeDtoMethod(content, method.name),
+  validator: (content, _ctx, method) => removeValidatorMethod(content, method.name),
+  routes: (content, ctx, method) => removeRoutesMethod(content, ctx, method),
+};

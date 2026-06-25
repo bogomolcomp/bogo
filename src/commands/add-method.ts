@@ -2,27 +2,10 @@ import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { AddMethodOptions, ModulePart, ModuleTemplateContext } from "../interfaces";
 import { loadConfig } from "../utils/config";
+import { parseMethodSpec } from "../utils/method-spec";
 import { resolveModuleNames } from "../utils/naming";
-import {
-  parseMethodSpec,
-  patchControllerMethod,
-  patchDtoMethod,
-  patchRoutesMethod,
-  patchServiceMethod,
-  patchValidatorMethod,
-} from "../utils/patch-method";
+import { PATCHERS } from "../utils/patch-method";
 import { MODULE_PARTS } from "../utils/parts";
-
-const PATCHERS: Record<
-  ModulePart,
-  (content: string, ctx: ModuleTemplateContext, method: ReturnType<typeof parseMethodSpec>) => string
-> = {
-  controller: patchControllerMethod,
-  service: patchServiceMethod,
-  dto: patchDtoMethod,
-  validator: patchValidatorMethod,
-  routes: patchRoutesMethod,
-};
 
 export function runAddMethod(cwd: string, moduleName: string, options: AddMethodOptions): void {
   const config = loadConfig(cwd);
@@ -35,7 +18,7 @@ export function runAddMethod(cwd: string, moduleName: string, options: AddMethod
   }
 
   const parts = options.parts.length > 0 ? options.parts : MODULE_PARTS;
-  const ctx: ModuleTemplateContext = { names, methods: [] };
+  const ctx: ModuleTemplateContext = { names, methods: [], middleware: options.middleware };
   const updated: string[] = [];
 
   for (const part of parts) {
@@ -48,7 +31,12 @@ export function runAddMethod(cwd: string, moduleName: string, options: AddMethod
     for (const method of methods) {
       content = PATCHERS[part](content, ctx, method);
     }
-    writeFileSync(filePath, content, "utf-8");
+
+    if (options.dryRun) {
+      console.log(`[dry-run] patch ${filePath}`);
+    } else {
+      writeFileSync(filePath, content, "utf-8");
+    }
     updated.push(filePath);
   }
 

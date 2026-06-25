@@ -12,6 +12,8 @@
 
 CLI generator for Express API. Works in any repository — configured via `.bogorc.json`.
 
+![bogo demo](docs/demo/bogo-demo.gif)
+
 ## Quick start
 
 ```bash
@@ -58,8 +60,7 @@ npm link
 ## Create a new project
 
 ```bash
-mkdir my-api && cd my-api
-bogo create app
+bogo create app my-api --with-docker --with-eslint
 ```
 
 Or into a subdirectory:
@@ -109,15 +110,19 @@ Creates `.bogorc.json`:
 {
   "apiDir": "src/api",
   "indexFile": "src/index.ts",
-  "routePrefix": "/api"
+  "routePrefix": "/api",
+  "templatesDir": "./bogo-templates"
 }
 ```
+
+`templatesDir` is optional. Place `controller.template`, `service.template`, etc. to override built-in templates.
 
 ## Generate a module
 
 ```bash
 bogo g analytics -m getStats -m getReport
-bogo g orders -m createOrder:/create -m getOrder:/:id
+bogo g orders -m createOrder:POST:/create -m getOrder:GET:/:id
+bogo g posts -m getList:GET:/list -w auth
 ```
 
 Creates:
@@ -170,6 +175,33 @@ bogo g method users -m getList -p controller -p service -p dto
 
 `-m` is required. `-p` is optional — without it, all found files are updated.
 
+## Remove a method
+
+```bash
+bogo r method users -m getList
+bogo r method users -m createUser -p controller -p service
+```
+
+## List modules
+
+```bash
+bogo list
+```
+
+## Doctor
+
+```bash
+bogo doctor
+```
+
+Checks `.bogorc.json`, index file, api directory, and required middleware.
+
+## Interactive mode
+
+```bash
+bogo g --interactive
+```
+
 ## Remove a module
 
 ```bash
@@ -179,13 +211,28 @@ bogo r orders --skip-index
 
 Removes the module folder and cleans up import + `app.use` in the index file.
 
+## Method spec format
+
+| Example | Result |
+|---------|--------|
+| `getList` | POST `/get-list` |
+| `getList:GET` | GET `/get-list` |
+| `getOrder:GET:/:id` | GET `/:id` |
+| `createOrder:POST:/create` | POST `/create` |
+
 ## Options
 
 | Flag | Description |
 |------|-------------|
-| `-m, --method` | Method name. Repeatable. Format: `getList` or `getList:/custom-path` |
-| `-p, --part` | Target a specific part (for `g method` and `g <part>`) |
-| `--skip-index` | Do not patch the index file (for `g` and `r`) |
+| `-m, --method` | Method spec (repeatable). See table above |
+| `-p, --part` | Target a specific part |
+| `-w, --middleware` | Route middleware name (repeatable) |
+| `-i, --interactive` | Interactive generate |
+| `--dry-run` | Preview changes without writing |
+| `--force` | Overwrite existing files |
+| `--skip-index` | Do not patch the index file |
+| `--with-docker` | Add Docker files to `create app` |
+| `--with-eslint` | Add ESLint to `create app` |
 
 ## Target project requirements
 
@@ -200,10 +247,13 @@ Removes the module folder and cleans up import + `app.use` in the index file.
 
 ```bash
 npm run build
-npm run dev -- create app ./tmp-app
-npm run dev -- g test -m getList
+npm test
+npm run dev -- create app ./tmp-app --with-eslint
+npm run dev -- g test -m getList:GET
 npm run dev -- g method test -m createUser
-npm run dev -- r test
+npm run dev -- r method test -m createUser
+npm run dev -- list
+npm run dev -- doctor
 ```
 
 ## Links
